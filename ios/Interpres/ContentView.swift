@@ -67,7 +67,7 @@ struct ContentView: View {
         VStack(spacing: 6) {
             Image(systemName: "laptopcomputer.and.ipad")
                 .font(.system(size: 48))
-                .foregroundStyle(.tint)
+                .foregroundStyle(Color.accentColor)
                 .padding(.bottom, 4)
 
             Text("Interpres")
@@ -85,12 +85,12 @@ struct ContentView: View {
             HStack(spacing: 14) {
                 Image(systemName: jitEnabled ? "checkmark.shield.fill" : "xmark.shield.fill")
                     .font(.system(size: 36))
-                    .foregroundStyle(jitEnabled ? .green : .red)
+                    .foregroundStyle(jitEnabled ? Color.green : Color.red)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(jitEnabled ? "JIT Active" : "JIT Inactive")
                         .font(.title3.bold())
-                        .foregroundStyle(jitEnabled ? .green : .primary)
+                        .foregroundStyle(jitEnabled ? Color.green : Color.primary)
 
                     Text(jitEnabled
                          ? "Debugger attached via csops (CS_DEBUGGED). Mac binaries can execute."
@@ -141,7 +141,7 @@ struct ContentView: View {
                     .controlSize(.small)
             } else {
                 Image(systemName: launcher.isSuccess == true ? "checkmark.circle.fill" : (launcher.isSuccess == false ? "exclamationmark.triangle.fill" : "info.circle.fill"))
-                    .foregroundStyle(launcher.isSuccess == true ? .green : (launcher.isSuccess == false ? .orange : .blue))
+                    .foregroundStyle(launcher.isSuccess == true ? Color.green : (launcher.isSuccess == false ? Color.orange : Color.blue))
             }
 
             Text(message)
@@ -180,7 +180,7 @@ struct ContentView: View {
             HStack(spacing: 12) {
                 Image(systemName: method.iconName)
                     .font(.title2)
-                    .foregroundStyle(.tint)
+                    .foregroundStyle(Color.accentColor)
                     .frame(width: 32)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -293,7 +293,7 @@ struct ContentView: View {
             } label: {
                 Image(systemName: copiedItem == id ? "checkmark" : "doc.on.doc")
                     .font(.caption)
-                    .foregroundStyle(copiedItem == id ? .green : .tint)
+                    .foregroundStyle(copiedItem == id ? Color.green : Color.accentColor)
             }
             .buttonStyle(.borderless)
             .padding(.leading, 4)
