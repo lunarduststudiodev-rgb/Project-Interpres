@@ -4,8 +4,8 @@ import UIKit
 /// Available JIT attachment providers and schemes.
 public enum JITMethod: String, CaseIterable, Identifiable {
     case stikDebug = "StikDebug"
-    case trollStore = "TrollStore"
     case sideStore = "SideStore"
+    case trollStore = "TrollStore"
 
     public var id: String { rawValue }
 
@@ -13,10 +13,10 @@ public enum JITMethod: String, CaseIterable, Identifiable {
         switch self {
         case .stikDebug:
             return "stikjit"
-        case .trollStore:
-            return "apple-magnifier"
         case .sideStore:
             return "sidestore"
+        case .trollStore:
+            return "apple-magnifier"
         }
     }
 
@@ -27,11 +27,11 @@ public enum JITMethod: String, CaseIterable, Identifiable {
     public var description: String {
         switch self {
         case .stikDebug:
-            return "Local loopback VPN debugger (stikjit://)"
-        case .trollStore:
-            return "TrollStore helper (apple-magnifier://)"
+            return "Local loopback debugger (stikjit://)"
         case .sideStore:
-            return "SideStore sideload manager"
+            return "SideStore sideload manager (sidestore://)"
+        case .trollStore:
+            return "TrollStore helper (requires TrollStore installed)"
         }
     }
 
@@ -39,10 +39,10 @@ public enum JITMethod: String, CaseIterable, Identifiable {
         switch self {
         case .stikDebug:
             return "ladybug.fill"
-        case .trollStore:
-            return "wand.and.stars"
         case .sideStore:
             return "arrow.triangle.2.circlepath.circle.fill"
+        case .trollStore:
+            return "wand.and.stars"
         }
     }
 
@@ -50,19 +50,32 @@ public enum JITMethod: String, CaseIterable, Identifiable {
         let encodedBundleID = bundleID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? bundleID
         switch self {
         case .stikDebug:
-            // stikjit://enable-jit?bundle-id=<id>&pid=<pid>
             return URL(string: "stikjit://enable-jit?bundle-id=\(encodedBundleID)&pid=\(pid)")
-        case .trollStore:
-            // apple-magnifier://enable-jit?bundle-id=<id>
-            return URL(string: "apple-magnifier://enable-jit?bundle-id=\(encodedBundleID)")
         case .sideStore:
             return URL(string: "sidestore://")
+        case .trollStore:
+            return URL(string: "apple-magnifier://enable-jit?bundle-id=\(encodedBundleID)")
         }
     }
 
     public var isAvailableOnDevice: Bool {
-        guard let url = url() else { return false }
-        return UIApplication.shared.canOpenURL(url)
+        switch self {
+        case .stikDebug:
+            return UIApplication.shared.canOpenURL(URL(string: "stikjit://")!)
+        case .sideStore:
+            return UIApplication.shared.canOpenURL(URL(string: "sidestore://")!)
+        case .trollStore:
+            // apple-magnifier:// is Apple's built-in Magnifier camera on iOS.
+            // ONLY report available if TrollStore marker file actually exists!
+            return Self.isTrollStoreActuallyInstalled
+        }
+    }
+
+    /// Whether this app was actually installed by TrollStore (which creates a _TrollStore marker).
+    public static var isTrollStoreActuallyInstalled: Bool {
+        guard let containerURL = Bundle.main.bundleURL.deletingLastPathComponent() as URL? else { return false }
+        let marker = containerURL.appendingPathComponent("_TrollStore")
+        return FileManager.default.fileExists(atPath: marker.path)
     }
 }
 
@@ -84,7 +97,7 @@ public final class JITLauncher: ObservableObject {
         self.statusMessage = "Enabling JIT..."
         self.isSuccess = nil
 
-        // 1. If process can grant its own JIT (TrollStore dynamic-codesigning, MAP_JIT)
+        // 1. Direct self-grant (MAP_JIT / jailbreak)
         if SelfJITGrant.canSelfGrant {
             self.isTriggering = false
             self.isSuccess = true
@@ -92,72 +105,80 @@ public final class JITLauncher: ObservableObject {
             return
         }
 
-        // 2. If Built-in StikJIT is ready (pairing file + LocalDevVPN + helper)
+        // 2. StikDebug (stikjit://) - this is what Henge uses for 1-click on-device JIT!
+        let stikURL = JITMethod.stikDebug.url()!
+        if UIApplication.shared.canOpenURL(URL(string: "stikjit://")!) {
+            trigger(JITMethod.stikDebug)
+            return
+        }
+
+        // 3. Built-in StikJIT (if pairing file is loaded and VPN connected)
         if PairingManager.hasPairingFile && BuiltInJIT.isHelperInstalled && LocalDevVPN.isConnected {
             BuiltInJIT.shared.enableJIT()
             self.isTriggering = false
             return
         }
 
-        // 3. Try StikDebug URL scheme
-        if let stikUrl = JITMethod.stikDebug.url(), UIApplication.shared.canOpenURL(stikUrl) {
-            trigger(JITMethod.stikDebug)
-            return
-        }
+        // 4. Try opening stikjit:// directly even if canOpenURL was restricted
+        UIApplication.shared.open(stikURL, options: [:]) { [weak self] stikSuccess in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                if stikSuccess {
+                    self.isTriggering = false
+                    self.isSuccess = true
+                    self.statusMessage = "Opened StikDebug. Attaching JIT..."
+                    return
+                }
 
-        // 4. Try TrollStore URL scheme
-        if let trollUrl = JITMethod.trollStore.url(), UIApplication.shared.canOpenURL(trollUrl) {
-            trigger(JITMethod.trollStore)
-            return
-        }
-
-        // 5. Try opening StikDebug without canOpenURL check (container apps often block canOpenURL queries)
-        if let stikUrl = JITMethod.stikDebug.url() {
-            UIApplication.shared.open(stikUrl, options: [:]) { [weak self] success in
-                Task { @MainActor [weak self] in
-                    guard let self = self else { return }
-                    if success {
-                        self.isTriggering = false
-                        self.isSuccess = true
-                        self.statusMessage = "Opened StikDebug. Waiting for debugger to attach..."
-                    } else {
-                        // 6. Try TrollStore fallback
-                        if let trollUrl = JITMethod.trollStore.url() {
-                            UIApplication.shared.open(trollUrl, options: [:]) { [weak self] tSuccess in
-                                Task { @MainActor [weak self] in
-                                    guard let self = self else { return }
-                                    if tSuccess {
-                                        self.isTriggering = false
-                                        self.isSuccess = true
-                                        self.statusMessage = "Opened TrollStore. Waiting for attach..."
-                                    } else {
-                                        // 7. Try SideStore
-                                        if let sideStoreUrl = URL(string: "sidestore://") {
-                                            UIApplication.shared.open(sideStoreUrl, options: [:]) { [weak self] sSuccess in
-                                                Task { @MainActor [weak self] in
-                                                    guard let self = self else { return }
-                                                    self.isTriggering = false
-                                                    if sSuccess {
-                                                        self.statusMessage = "Opened SideStore: Long-press Interpres in My Apps and tap Enable JIT."
-                                                    } else {
-                                                        self.isSuccess = false
-                                                        self.statusMessage = "No JIT provider found. Install StikDebug or import a pairing file for Built-in JIT."
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                // 5. Try SideStore (sidestore://)
+                if let sideStoreURL = URL(string: "sidestore://"), UIApplication.shared.canOpenURL(sideStoreURL) {
+                    UIApplication.shared.open(sideStoreURL, options: [:]) { sSuccess in
+                        Task { @MainActor [weak self] in
+                            guard let self = self else { return }
+                            self.isTriggering = false
+                            if sSuccess {
+                                self.statusMessage = "Opened SideStore: In 'My Apps', long-press Interpres → Enable JIT."
+                            } else {
+                                self.isSuccess = false
+                                self.statusMessage = "Please open SideStore or StikDebug to attach JIT."
                             }
                         }
                     }
+                    return
                 }
+
+                // 6. Only check TrollStore if verified marker file exists (never open Apple Magnifier camera!)
+                if JITMethod.isTrollStoreActuallyInstalled, let trollURL = JITMethod.trollStore.url() {
+                    UIApplication.shared.open(trollURL, options: [:]) { tSuccess in
+                        Task { @MainActor [weak self] in
+                            guard let self = self else { return }
+                            self.isTriggering = false
+                            if tSuccess {
+                                self.statusMessage = "Opened TrollStore. Attaching JIT..."
+                            }
+                        }
+                    }
+                    return
+                }
+
+                // 7. Nothing answered
+                self.isTriggering = false
+                self.isSuccess = false
+                self.statusMessage = "StikDebug not found. Open SideStore → My Apps → Long-press Interpres → Enable JIT."
             }
         }
     }
 
     /// Trigger JIT attachment for a specific provider via UIApplication.shared.open.
     public func trigger(_ method: JITMethod) {
+        // Guard against opening Apple Magnifier camera if TrollStore is not installed
+        if method == .trollStore && !JITMethod.isTrollStoreActuallyInstalled {
+            self.isTriggering = false
+            self.isSuccess = false
+            self.statusMessage = "TrollStore is not installed. (apple-magnifier would open camera)."
+            return
+        }
+
         guard let url = method.url() else {
             self.statusMessage = "Error: Failed to construct URL for \(method.title)."
             self.isSuccess = false
