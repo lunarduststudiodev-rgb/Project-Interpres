@@ -15,10 +15,19 @@ public enum JITStatus {
         return result == 0 ? flags : nil
     }
 
-    /// True once a debugger (StikDebug, SideStore, TrollStore, Xcode) has attached.
-    /// From then on the kernel lets this process run code pages that are not signed,
-    /// which is what loading a Mac binary needs.
+    /// True if an attached debugger has granted JIT (CS_DEBUGGED) or if the app can self-grant (MAP_JIT / TrollStore).
     public static var isEnabled: Bool {
+        if isKernelDebugged {
+            return true
+        }
+        if SelfJITGrant.canSelfGrant {
+            return true
+        }
+        return false
+    }
+
+    /// True if kernel CS_DEBUGGED flag is set.
+    public static var isKernelDebugged: Bool {
         guard let flags = flags else { return false }
         return (flags & CS_DEBUGGED) != 0
     }

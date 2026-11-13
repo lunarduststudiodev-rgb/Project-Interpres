@@ -51,15 +51,22 @@ public final class BuiltInJIT: ObservableObject {
         guard !isBusy else { return }
 
         guard let pairingData = PairingManager.pairingData else {
-            self.lastError = "No pairing file found. Please import a pairing file first."
-            self.statusMessage = "Missing pairing file"
+            self.lastError = "Missing Pairing File: Tap 'Import' to select your pairingFile.plist."
+            self.statusMessage = "No pairing file"
             self.isSuccess = false
             return
         }
 
-        guard let helperId = Self.helperIdentifier else {
-            self.lastError = "Interpres JIT helper extension is missing from the bundle."
-            self.statusMessage = "Helper not found"
+        guard Self.isHelperInstalled, let helperId = Self.helperIdentifier else {
+            self.lastError = "JIT Helper Missing: The sideloader stripped the app extension (PlugIns/InterpresJITHelper.appex). Sideload with SideStore/AltStore with extensions enabled, or use the SideStore app's Enable JIT option."
+            self.statusMessage = "Helper extension not found"
+            self.isSuccess = false
+            return
+        }
+
+        guard LocalDevVPN.isConnected else {
+            self.lastError = "LocalDevVPN Disconnected: On-device JIT requires LocalDevVPN connected to reach 10.7.0.1. Tap 'Connect LocalDevVPN' first."
+            self.statusMessage = "VPN disconnected"
             self.isSuccess = false
             return
         }
@@ -94,15 +101,22 @@ public final class BuiltInJIT: ObservableObject {
         guard !isBusy else { return }
 
         guard let pairingData = PairingManager.pairingData else {
-            self.lastError = "No pairing file found. Please import a pairing file first."
-            self.statusMessage = "Missing pairing file"
+            self.lastError = "Missing Pairing File: Tap 'Import' to select your pairingFile.plist."
+            self.statusMessage = "No pairing file"
             self.isSuccess = false
             return
         }
 
-        guard let helperId = Self.helperIdentifier else {
-            self.lastError = "Interpres JIT helper extension is missing from the bundle."
+        guard Self.isHelperInstalled, let helperId = Self.helperIdentifier else {
+            self.lastError = "JIT Helper Missing: PlugIns/InterpresJITHelper.appex not found."
             self.statusMessage = "Helper not found"
+            self.isSuccess = false
+            return
+        }
+
+        guard LocalDevVPN.isConnected else {
+            self.lastError = "LocalDevVPN Disconnected: Please connect LocalDevVPN first."
+            self.statusMessage = "VPN disconnected"
             self.isSuccess = false
             return
         }

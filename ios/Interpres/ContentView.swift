@@ -3,11 +3,14 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @State private var jitEnabled = JITStatus.isEnabled
+    @State private var isKernelDebugged = JITStatus.isKernelDebugged
     @State private var rawFlagsHex = JITStatus.flagsHexString
     @State private var copiedItem: String?
     @State private var isImportingPairing = false
     @State private var pairingImportError: String?
     @State private var hasPairingFile = PairingManager.hasPairingFile
+    @State private var isVpnConnected = LocalDevVPN.isConnected
+    @State private var isHelperInstalled = BuiltInJIT.isHelperInstalled
 
     @ObservedObject private var builtInJIT = BuiltInJIT.shared
     @ObservedObject private var launcher = JITLauncher.shared
@@ -21,6 +24,7 @@ struct ContentView: View {
                     headerView
                     statusBanner
                     builtInJITSection
+                    sideStoreGuideCard
                     externalAppsSection
                     diagnosticsSection
                     deviceFooter
@@ -33,12 +37,12 @@ struct ContentView: View {
                 handlePairingImport(result)
             }
             .onReceive(timer) { _ in
-                let current = JITStatus.isEnabled
-                if jitEnabled != current {
-                    jitEnabled = current
-                }
+                jitEnabled = JITStatus.isEnabled
+                isKernelDebugged = JITStatus.isKernelDebugged
                 rawFlagsHex = JITStatus.flagsHexString
                 hasPairingFile = PairingManager.hasPairingFile
+                isVpnConnected = LocalDevVPN.isConnected
+                isHelperInstalled = BuiltInJIT.isHelperInstalled
             }
         }
     }
@@ -72,11 +76,17 @@ struct ContentView: View {
                         .font(.title3.bold())
                         .foregroundStyle(jitEnabled ? Color.green : Color.red)
 
-                    Text(jitEnabled
-                         ? "Kernel CS_DEBUGGED active. Mac binaries can execute."
-                         : "Executable memory restricted. Attach a debugger to enable.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if jitEnabled {
+                        Text(isKernelDebugged
+                             ? "Kernel CS_DEBUGGED active. Mac binaries can execute."
+                             : "Dynamic codesigning active (MAP_JIT self-granted).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Executable memory restricted. Attach a debugger to enable.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
             }
@@ -108,48 +118,91 @@ struct ContentView: View {
                     .clipShape(Capsule())
             }
 
-            Text("Enable JIT entirely on-device using the built-in helper extension, without switching to external apps (same engine used by Henge).")
+            Text("Like Henge, Interpres uses an embedded helper extension to mount the Developer Disk Image and attach debugserver on-device without switching apps.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            // Pairing File Row
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Pairing File")
-                        .font(.subheadline.bold())
-                    Text(hasPairingFile ? "pairingFile.plist loaded" : "No pairing file imported")
-                        .font(.caption)
-                        .foregroundStyle(hasPairingFile ? Color.green : Color.secondary)
-                }
-                Spacer()
-                Button(hasPairingFile ? "Replace" : "Import") {
-                    isImportingPairing = true
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-
-                if hasPairingFile {
-                    Button(role: .destructive) {
-                        try? PairingManager.deletePairingFile()
-                        hasPairingFile = false
-                    } label: {
-                        Image(systemName: "trash")
+            // Checklist requirements
+            VStack(spacing: 8) {
+                // 1. Pairing File
+                HStack {
+                    Image(systemName: hasPairingFile ? "checkmark.circle.fill" : "xmark.circle")
+                        .foregroundStyle(hasPairingFile ? Color.green : Color.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("1. Pairing File")
+                            .font(.subheadline.bold())
+                        Text(hasPairingFile ? "pairingFile.plist loaded" : "Tap Import to select pairingFile.plist")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button(hasPairingFile ? "Replace" : "Import") {
+                        isImportingPairing = true
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
-            }
-            .padding(12)
-            .background(Color(uiColor: .secondarySystemBackground))
-            .cornerRadius(10)
+                .padding(10)
+                .background(Color(uiColor: .secondarySystemBackground))
+                .cornerRadius(10)
 
-            if let error = pairingImportError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(Color.red)
+                // 2. LocalDevVPN
+                HStack {
+                    Image(systemName: isVpnConnected ? "checkmark.circle.fill" : "xmark.circle")
+                        .foregroundStyle(isVpnConnected ? Color.green : Color.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("2. LocalDevVPN Loopback")
+                            .font(.subheadline.bold())
+                        Text(isVpnConnected ? "Tunnel active (10.7.0.0/16)" : "Needs LocalDevVPN connected")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button(isVpnConnected ? "Connected" : (LocalDevVPN.isInstalled ? "Connect" : "Get VPN")) {
+                        LocalDevVPN.open()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isVpnConnected)
+                }
+                .padding(10)
+                .background(Color(uiColor: .secondarySystemBackground))
+                .cornerRadius(10)
+
+                // 3. Helper Extension
+                HStack {
+                    Image(systemName: isHelperInstalled ? "checkmark.circle.fill" : "exclamationmark.triangle")
+                        .foregroundStyle(isHelperInstalled ? Color.green : Color.red)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("3. JIT Helper Extension")
+                            .font(.subheadline.bold())
+                        Text(isHelperInstalled ? "PlugIns/InterpresJITHelper.appex present" : "Helper stripped by sideloader (use SideStore below)")
+                            .font(.caption)
+                            .foregroundStyle(isHelperInstalled ? Color.secondary : Color.red)
+                    }
+                    Spacer()
+                }
+                .padding(10)
+                .background(Color(uiColor: .secondarySystemBackground))
+                .cornerRadius(10)
             }
 
-            // Built-in Action Buttons
+            // Error display
+            if let error = builtInJIT.lastError ?? pairingImportError {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Color.red)
+                        .padding(.top, 2)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(Color.red)
+                }
+                .padding(10)
+                .background(Color.red.opacity(0.1))
+                .cornerRadius(8)
+            }
+
+            // Trigger Buttons
             HStack(spacing: 12) {
                 Button {
                     builtInJIT.enableJIT()
@@ -166,7 +219,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(builtInJIT.isBusy || !hasPairingFile)
+                .disabled(builtInJIT.isBusy || !hasPairingFile || !isHelperInstalled)
 
                 Button {
                     builtInJIT.prepareDevice()
@@ -175,37 +228,71 @@ struct ContentView: View {
                         .frame(maxWidth: 80)
                 }
                 .buttonStyle(.bordered)
-                .disabled(builtInJIT.isBusy || !hasPairingFile)
+                .disabled(builtInJIT.isBusy || !hasPairingFile || !isHelperInstalled)
             }
 
             if let status = builtInJIT.statusMessage {
-                HStack(spacing: 6) {
-                    Image(systemName: (builtInJIT.isSuccess == true) ? "checkmark.circle.fill" : "info.circle.fill")
-                        .foregroundStyle((builtInJIT.isSuccess == true) ? Color.green : Color.accentColor)
-                    Text(status)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.top, 4)
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle((builtInJIT.isSuccess == true) ? Color.green : Color.secondary)
             }
-
-            Text("Tip: Ensure LocalDevVPN tunnel is active if running on iOS 17.4+.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
         }
         .padding()
         .background(Color(uiColor: .secondarySystemGroupedBackground))
         .cornerRadius(16)
     }
 
+    // MARK: - SideStore Direct Guide Card
+    private var sideStoreGuideCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("SideStore User? (1-Tap Sideload JIT)", systemImage: "sparkles")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(Color.primary)
+                Spacer()
+            }
+
+            Text("SideStore handles JIT natively without needing LocalDevVPN or extra pairing files:")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("1. Connect your **SideStore VPN** in iOS Settings.")
+                Text("2. Open **SideStore** and go to **My Apps**.")
+                Text("3. **Long-press on Interpres** and tap **Enable JIT**.")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.leading, 4)
+
+            Button {
+                if let url = URL(string: "sidestore://") {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                HStack {
+                    Image(systemName: "arrow.up.forward.app")
+                    Text("Open SideStore App")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding()
+        .background(Color.accentColor.opacity(0.08))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.accentColor.opacity(0.2), lineWidth: 1)
+        )
+        .cornerRadius(16)
+    }
+
     // MARK: - External Apps Fallback
     private var externalAppsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("External App Triggers", systemImage: "arrow.up.right.square")
+            Label("Other External Triggers", systemImage: "arrow.up.right.square")
                 .font(.headline)
-            Text("If you prefer using an external debugger or sideloading tool:")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
 
             ForEach(JITMethod.allCases) { method in
                 Button {
@@ -258,6 +345,8 @@ struct ContentView: View {
                 diagnosticRow(title: "Process ID (PID)", value: "\(JITStatus.processID)", id: "pid")
                 diagnosticRow(title: "Bundle ID", value: JITStatus.bundleID, id: "bundle")
                 diagnosticRow(title: "csops Status Flags", value: rawFlagsHex, id: "flags")
+                diagnosticRow(title: "Kernel CS_DEBUGGED", value: isKernelDebugged ? "YES (0x10000000)" : "NO", id: "debugged")
+                diagnosticRow(title: "Self-Grant (MAP_JIT)", value: SelfJITGrant.canSelfGrant ? "Available" : "No", id: "mapjit")
             }
         }
         .padding()

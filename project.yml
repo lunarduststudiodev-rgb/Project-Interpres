@@ -19,10 +19,15 @@ targets:
         UILaunchScreen: {}
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.interpres.app
+            CFBundleURLSchemes:
+              - interpres
         LSApplicationQueriesSchemes:
           - stikjit
           - sidestore
           - apple-magnifier
+          - localdevvpn
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
