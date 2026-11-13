@@ -19,6 +19,10 @@ targets:
         # Expose the app's Documents folder in Files, for importing Mac apps later.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+        LSApplicationQueriesSchemes:
+          - stikjit
+          - sidestore
+          - apple-magnifier
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
