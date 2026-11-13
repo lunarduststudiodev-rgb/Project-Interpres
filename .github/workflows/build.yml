@@ -15,15 +15,8 @@ jobs:
       - name: Install xcodegen
         run: brew install xcodegen
 
-      - name: Fetch StikJIT dependency
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p deps
-          gh release download 2.0.1 -R StikDebug/StikJIT -p "StikJIT.xcframework.zip" -D deps
-          unzip -q deps/StikJIT.xcframework.zip -d deps
-          rm -f deps/StikJIT.xcframework.zip
-          python3 -c "import glob; [open(p, 'w').write(open(p).read().replace('::', '.')) for p in glob.glob('deps/StikJIT.xcframework/**/*.swiftinterface', recursive=True)]"
+      - name: Build StikJIT dependency
+        run: bash ios/scripts/fetch_deps.sh
 
       - name: Generate project
         run: xcodegen generate
