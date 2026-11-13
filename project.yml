@@ -1,0 +1,40 @@
+name: Interpres
+options:
+  bundleIdPrefix: dev.interpres
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  Interpres:
+    type: application
+    platform: iOS
+    sources:
+      - ios/Interpres
+    info:
+      path: ios/Info.plist
+      properties:
+        CFBundleDisplayName: Interpres
+        CFBundleShortVersionString: "0.0.1"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        # Expose the app's Documents folder in Files, for importing Mac apps later.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.interpres.app
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+schemes:
+  Interpres:
+    build:
+      targets:
+        Interpres: all
