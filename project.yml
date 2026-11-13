@@ -2,13 +2,14 @@ name: Interpres
 options:
   bundleIdPrefix: dev.interpres
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "17.0"
 targets:
   Interpres:
     type: application
     platform: iOS
     sources:
       - ios/Interpres
+      - ios/InterpresJITHelper/InterpresJITMessages.swift
     info:
       path: ios/Info.plist
       properties:
@@ -16,7 +17,7 @@ targets:
         CFBundleShortVersionString: "0.0.1"
         CFBundleVersion: "1"
         UILaunchScreen: {}
-        # Expose the app's Documents folder in Files, for importing Mac apps later.
+        # Expose the app's Documents folder in Files, for importing Mac apps and pairing files.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         LSApplicationQueriesSchemes:
@@ -37,8 +38,66 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.interpres.app
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_VERSION: "5.0"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/Frameworks"
+    dependencies:
+      - target: InterpresJITHelper
+    postBuildScripts:
+      - name: Embed StikJIT
+        script: |
+          set -e
+          SRC="$SRCROOT/deps/StikJIT.xcframework/ios-arm64/StikJIT.framework"
+          DST="$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/StikJIT.framework"
+          rm -rf "$DST"
+          mkdir -p "$(dirname "$DST")"
+          ditto "$SRC" "$DST"
+          rm -rf "$DST/Headers" "$DST/Modules"
+          PLIST="$DST/Info.plist"
+          if [ ! -f "$PLIST" ]; then
+            plutil -create xml1 "$PLIST"
+            plutil -insert CFBundleIdentifier -string "$PRODUCT_BUNDLE_IDENTIFIER.StikJIT" "$PLIST"
+            plutil -insert CFBundleExecutable -string StikJIT "$PLIST"
+            plutil -insert CFBundleName -string StikJIT "$PLIST"
+            plutil -insert CFBundlePackageType -string FMWK "$PLIST"
+            plutil -insert CFBundleInfoDictionaryVersion -string 6.0 "$PLIST"
+            plutil -insert CFBundleShortVersionString -string 2.0.1 "$PLIST"
+            plutil -insert CFBundleVersion -string 2.0.1 "$PLIST"
+            plutil -insert MinimumOSVersion -string 17.0 "$PLIST"
+            plutil -insert CFBundleSupportedPlatforms -array "$PLIST"
+            plutil -insert CFBundleSupportedPlatforms.0 -string iPhoneOS "$PLIST"
+          fi
+          if [ -n "$EXPANDED_CODE_SIGN_IDENTITY" ] && [ "$CODE_SIGNING_ALLOWED" != "NO" ]; then
+            codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" --timestamp=none "$DST"
+          fi
+        basedOnDependencyAnalysis: false
+
+  InterpresJITHelper:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: ios/InterpresJITHelper
+        excludes:
+          - "Info.plist"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.interpres.app.JITHelper
+        INFOPLIST_FILE: ios/InterpresJITHelper/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        APPLICATION_EXTENSION_API_ONLY: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/../../Frameworks"
+    dependencies:
+      - framework: deps/StikJIT.xcframework
+        embed: false
+
 schemes:
   Interpres:
     build:
       targets:
         Interpres: all
+        InterpresJITHelper: all

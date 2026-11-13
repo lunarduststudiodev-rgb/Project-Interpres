@@ -1,385 +1,318 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
-    @StateObject private var launcher = JITLauncher.shared
-    @State private var jitEnabled: Bool = JITStatus.isEnabled
-    @State private var rawFlags: String = JITStatus.flagsHexString
+    @State private var jitEnabled = JITStatus.isEnabled
+    @State private var rawFlagsHex = JITStatus.flagsHexString
     @State private var copiedItem: String?
-    @Environment(\.scenePhase) private var scenePhase
+    @State private var isImportingPairing = false
+    @State private var pairingImportError: String?
+    @State private var hasPairingFile = PairingManager.hasPairingFile
 
-    private let timer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
+    @ObservedObject private var builtInJIT = BuiltInJIT.shared
+    @ObservedObject private var launcher = JITLauncher.shared
+
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
-                    // Header
-                    headerSection
-
-                    // Live JIT Status Card
-                    statusCard
-
-                    // Launcher Feedback Banner (if any)
-                    if let message = launcher.statusMessage {
-                        launcherFeedbackBanner(message)
-                    }
-
-                    // Action Buttons (StikDebug, SideStore, TrollStore)
-                    actionButtonsSection
-
-                    // Diagnostics / Process Info (PID, Bundle ID, csops)
+                VStack(spacing: 20) {
+                    headerView
+                    statusBanner
+                    builtInJITSection
+                    externalAppsSection
                     diagnosticsSection
-
-                    // Helpful Setup Guidance
-                    setupGuidanceSection
-
-                    // Device & Version Footer
-                    footerSection
+                    deviceFooter
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
-                .frame(maxWidth: 720)
+                .padding()
             }
-            .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("Interpres")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: refreshStatus) {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
-                }
+            .fileImporter(isPresented: $isImportingPairing, allowedContentTypes: [.item]) { result in
+                handlePairingImport(result)
             }
             .onReceive(timer) { _ in
-                refreshStatus()
-            }
-            .onChange(of: scenePhase) { phase in
-                if phase == .active {
-                    refreshStatus()
+                let current = JITStatus.isEnabled
+                if jitEnabled != current {
+                    jitEnabled = current
                 }
+                rawFlagsHex = JITStatus.flagsHexString
+                hasPairingFile = PairingManager.hasPairingFile
             }
         }
     }
 
-    // MARK: - Subviews
-
-    private var headerSection: some View {
+    // MARK: - Header
+    private var headerView: some View {
         VStack(spacing: 6) {
-            Image(systemName: "laptopcomputer.and.ipad")
-                .font(.system(size: 48))
+            Image(systemName: "cpu")
+                .font(.system(size: 40))
                 .foregroundStyle(Color.accentColor)
-                .padding(.bottom, 4)
-
-            Text("Interpres")
-                .font(.title.bold())
-
-            Text("Mac app translation layer for iPadOS")
-                .font(.subheadline)
+                .padding(.top, 8)
+            Text("Mac Translation Layer")
+                .font(.headline)
                 .foregroundStyle(.secondary)
+            Text("Loads Apple Silicon Mac binaries on iPadOS")
+                .font(.subheadline)
+                .foregroundStyle(.tertiary)
         }
-        .padding(.top, 8)
     }
 
-    private var statusCard: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 14) {
-                Image(systemName: jitEnabled ? "checkmark.shield.fill" : "xmark.shield.fill")
-                    .font(.system(size: 36))
+    // MARK: - Status Banner
+    private var statusBanner: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                Image(systemName: jitEnabled ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                    .font(.system(size: 28))
                     .foregroundStyle(jitEnabled ? Color.green : Color.red)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(jitEnabled ? "JIT Active" : "JIT Inactive")
+                    Text(jitEnabled ? "JIT Enabled" : "JIT Inactive")
                         .font(.title3.bold())
-                        .foregroundStyle(jitEnabled ? Color.green : Color.primary)
+                        .foregroundStyle(jitEnabled ? Color.green : Color.red)
 
                     Text(jitEnabled
-                         ? "Debugger attached via csops (CS_DEBUGGED). Mac binaries can execute."
-                         : "Debugger not attached. Unsigned code execution is blocked by the kernel.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-
-            Divider()
-
-            HStack {
-                Text("Kernel Flag:")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(rawFlags)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.primary)
-
-                Spacer()
-
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(jitEnabled ? Color.green : Color.orange)
-                        .frame(width: 8, height: 8)
-                    Text("Live Polling")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(uiColor: .secondarySystemGroupedBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(jitEnabled ? Color.green.opacity(0.3) : Color.red.opacity(0.3), lineWidth: 1.5)
-        )
-    }
-
-    private func launcherFeedbackBanner(_ message: String) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            if launcher.isTriggering {
-                ProgressView()
-                    .controlSize(.small)
-            } else {
-                Image(systemName: launcher.isSuccess == true ? "checkmark.circle.fill" : (launcher.isSuccess == false ? "exclamationmark.triangle.fill" : "info.circle.fill"))
-                    .foregroundStyle(launcher.isSuccess == true ? Color.green : (launcher.isSuccess == false ? Color.orange : Color.blue))
-            }
-
-            Text(message)
-                .font(.footnote)
-                .foregroundStyle(.primary)
-
-            Spacer()
-
-            Button(action: { launcher.clearStatus() }) {
-                Image(systemName: "xmark.circle")
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(uiColor: .tertiarySystemGroupedBackground))
-        )
-    }
-
-    private var actionButtonsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("One-Tap JIT Trigger")
-                .font(.headline)
-                .padding(.horizontal, 4)
-
-            ForEach(JITMethod.allCases) { method in
-                methodCard(method)
-            }
-        }
-    }
-
-    private func methodCard(_ method: JITMethod) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                Image(systemName: method.iconName)
-                    .font(.title2)
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 32)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(method.title)
-                            .font(.body.weight(.semibold))
-
-                        Text(method.scheme)
-                            .font(.caption2.monospaced())
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.secondary.opacity(0.15))
-                            .clipShape(Capsule())
-                    }
-
-                    Text(method.description)
+                         ? "Kernel CS_DEBUGGED active. Mac binaries can execute."
+                         : "Executable memory restricted. Attach a debugger to enable.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-
                 Spacer()
-
-                Button {
-                    launcher.trigger(method)
-                } label: {
-                    HStack(spacing: 4) {
-                        if launcher.isTriggering && launcher.lastTriggeredMethod == method {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Text("Trigger")
-                                .font(.subheadline.weight(.semibold))
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(launcher.isTriggering)
             }
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(uiColor: .secondarySystemGroupedBackground))
-        )
-    }
-
-    private var diagnosticsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Process & Diagnostics")
-                .font(.headline)
-                .padding(.horizontal, 4)
-
-            VStack(spacing: 0) {
-                diagnosticRow(
-                    label: "Process ID (PID)",
-                    value: "\(JITStatus.processID)",
-                    copyableText: "\(JITStatus.processID)",
-                    id: "pid"
-                )
-                Divider()
-                    .padding(.leading, 16)
-                diagnosticRow(
-                    label: "Bundle Identifier",
-                    value: JITStatus.bundleID,
-                    copyableText: JITStatus.bundleID,
-                    id: "bundle"
-                )
-                Divider()
-                    .padding(.leading, 16)
-                diagnosticRow(
-                    label: "csops Status",
-                    value: rawFlags,
-                    copyableText: rawFlags,
-                    id: "flags"
-                )
-            }
+            .padding()
             .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(jitEnabled ? Color.green.opacity(0.12) : Color.red.opacity(0.12))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(jitEnabled ? Color.green.opacity(0.3) : Color.red.opacity(0.3), lineWidth: 1)
             )
         }
     }
 
-    private func diagnosticRow(label: String, value: String, copyableText: String, id: String) -> some View {
-        HStack {
-            Text(label)
-                .font(.subheadline)
+    // MARK: - Built-in JIT Section (Like Henge)
+    private var builtInJITSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("Built-in StikJIT", systemImage: "bolt.badge.automatic.fill")
+                    .font(.headline)
+                    .foregroundStyle(Color.accentColor)
+                Spacer()
+                Text("On-Device")
+                    .font(.caption.bold())
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.accentColor.opacity(0.15))
+                    .clipShape(Capsule())
+            }
+
+            Text("Enable JIT entirely on-device using the built-in helper extension, without switching to external apps (same engine used by Henge).")
+                .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            Spacer()
-
-            Text(value)
-                .font(.subheadline.monospaced())
-                .foregroundStyle(.primary)
-
-            Button {
-                UIPasteboard.general.string = copyableText
-                withAnimation {
-                    copiedItem = id
+            // Pairing File Row
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Pairing File")
+                        .font(.subheadline.bold())
+                    Text(hasPairingFile ? "pairingFile.plist loaded" : "No pairing file imported")
+                        .font(.caption)
+                        .foregroundStyle(hasPairingFile ? Color.green : Color.secondary)
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    if copiedItem == id {
-                        withAnimation {
-                            copiedItem = nil
-                        }
+                Spacer()
+                Button(hasPairingFile ? "Replace" : "Import") {
+                    isImportingPairing = true
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                if hasPairingFile {
+                    Button(role: .destructive) {
+                        try? PairingManager.deletePairingFile()
+                        hasPairingFile = false
+                    } label: {
+                        Image(systemName: "trash")
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+            .padding(12)
+            .background(Color(uiColor: .secondarySystemBackground))
+            .cornerRadius(10)
+
+            if let error = pairingImportError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(Color.red)
+            }
+
+            // Built-in Action Buttons
+            HStack(spacing: 12) {
+                Button {
+                    builtInJIT.enableJIT()
+                } label: {
+                    HStack {
+                        if builtInJIT.isBusy {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "bolt.fill")
+                        }
+                        Text("Enable JIT Now")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(builtInJIT.isBusy || !hasPairingFile)
+
+                Button {
+                    builtInJIT.prepareDevice()
+                } label: {
+                    Text("Test DDI")
+                        .frame(maxWidth: 80)
+                }
+                .buttonStyle(.bordered)
+                .disabled(builtInJIT.isBusy || !hasPairingFile)
+            }
+
+            if let status = builtInJIT.statusMessage {
+                HStack(spacing: 6) {
+                    Image(systemName: (builtInJIT.isSuccess == true) ? "checkmark.circle.fill" : "info.circle.fill")
+                        .foregroundStyle((builtInJIT.isSuccess == true) ? Color.green : Color.accentColor)
+                    Text(status)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 4)
+            }
+
+            Text("Tip: Ensure LocalDevVPN tunnel is active if running on iOS 17.4+.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding()
+        .background(Color(uiColor: .secondarySystemGroupedBackground))
+        .cornerRadius(16)
+    }
+
+    // MARK: - External Apps Fallback
+    private var externalAppsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("External App Triggers", systemImage: "arrow.up.right.square")
+                .font(.headline)
+            Text("If you prefer using an external debugger or sideloading tool:")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            ForEach(JITMethod.allCases) { method in
+                Button {
+                    launcher.trigger(method)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: method.iconName)
+                            .font(.title2)
+                            .frame(width: 32)
+                            .foregroundStyle(Color.accentColor)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(method.title)
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(Color.primary)
+                            Text(method.description)
+                                .font(.caption)
+                                .foregroundStyle(Color.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "arrow.up.forward.app")
+                            .font(.caption)
+                            .foregroundStyle(Color.secondary)
+                    }
+                    .padding(12)
+                    .background(Color(uiColor: .secondarySystemBackground))
+                    .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if let status = launcher.statusMessage {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle((launcher.isSuccess == true) ? Color.green : Color.secondary)
+            }
+        }
+        .padding()
+        .background(Color(uiColor: .secondarySystemGroupedBackground))
+        .cornerRadius(16)
+    }
+
+    // MARK: - Diagnostics
+    private var diagnosticsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Process Diagnostics", systemImage: "wrench.and.screwdriver")
+                .font(.headline)
+
+            VStack(spacing: 8) {
+                diagnosticRow(title: "Process ID (PID)", value: "\(JITStatus.processID)", id: "pid")
+                diagnosticRow(title: "Bundle ID", value: JITStatus.bundleID, id: "bundle")
+                diagnosticRow(title: "csops Status Flags", value: rawFlagsHex, id: "flags")
+            }
+        }
+        .padding()
+        .background(Color(uiColor: .secondarySystemGroupedBackground))
+        .cornerRadius(16)
+    }
+
+    private func diagnosticRow(title: String, value: String, id: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(.footnote.monospaced())
+                .bold()
+            Button {
+                UIPasteboard.general.string = value
+                copiedItem = id
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    if copiedItem == id { copiedItem = nil }
                 }
             } label: {
                 Image(systemName: copiedItem == id ? "checkmark" : "doc.on.doc")
                     .font(.caption)
                     .foregroundStyle(copiedItem == id ? Color.green : Color.accentColor)
             }
-            .buttonStyle(.borderless)
-            .padding(.leading, 4)
+            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 4)
     }
 
-    private var setupGuidanceSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Setup Guidance")
-                .font(.headline)
-                .padding(.horizontal, 4)
-
-            VStack(alignment: .leading, spacing: 14) {
-                guidanceItem(
-                    title: "Why JIT is Required",
-                    text: "iOS prevents apps from allocating writable and executable memory simultaneously unless a debugger is attached. Translating Mac ARM64 binaries requires JIT compilation to load and run native code."
-                )
-
-                Divider()
-
-                guidanceItem(
-                    title: "StikDebug (On-Device)",
-                    text: "1. Install and open StikDebug.\n2. Ensure the local loopback VPN configuration is connected.\n3. Return here and tap 'Trigger' next to StikDebug. It will pass the current PID and Bundle ID via the stikjit:// scheme."
-                )
-
-                Divider()
-
-                guidanceItem(
-                    title: "SideStore (WireGuard VPN)",
-                    text: "1. Connect your device to SideStore's pairing WireGuard VPN.\n2. Tap 'Trigger' next to SideStore. SideStore will attach its debugger via sidestore:// and redirect back."
-                )
-
-                Divider()
-
-                guidanceItem(
-                    title: "TrollStore (Root Helper)",
-                    text: "Devices installed via TrollStore can use root helper privileges. Tap 'Trigger' next to TrollStore to invoke apple-magnifier://."
-                )
-
-                Divider()
-
-                guidanceItem(
-                    title: "Computer / Xcode Debugger",
-                    text: "You can also attach JIT manually by connecting your iPad to a Mac running Xcode (Debug > Attach to Process) or using pymobiledevice3 / jitstreamer over the local network."
-                )
-            }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(uiColor: .secondarySystemGroupedBackground))
-            )
-        }
-    }
-
-    private func guidanceItem(title: String, text: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
-
-            Text(text)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var footerSection: some View {
-        Text(deviceLine)
-            .font(.footnote.monospaced())
-            .foregroundStyle(.secondary)
-            .multilineTextAlignment(.center)
-            .padding(.top, 8)
-            .padding(.bottom, 16)
-    }
-
-    private var deviceLine: String {
+    // MARK: - Footer
+    private var deviceFooter: some View {
         let os = ProcessInfo.processInfo.operatingSystemVersionString
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-        return "Interpres \(version) · \(UIDevice.current.systemName) \(os)"
+        return Text("Interpres \(version) · \(UIDevice.current.systemName) \(os)")
+            .font(.footnote.monospaced())
+            .foregroundStyle(.secondary)
+            .padding(.top, 8)
     }
 
-    private func refreshStatus() {
-        jitEnabled = JITStatus.isEnabled
-        rawFlags = JITStatus.flagsHexString
+    // MARK: - Helper Methods
+    private func handlePairingImport(_ result: Result<URL, Error>) {
+        switch result {
+        case .success(let url):
+            do {
+                try PairingManager.importPairingFile(from: url)
+                hasPairingFile = true
+                pairingImportError = nil
+            } catch {
+                pairingImportError = "Import failed: \(error.localizedDescription)"
+            }
+        case .failure(let error):
+            pairingImportError = error.localizedDescription
+        }
     }
 }

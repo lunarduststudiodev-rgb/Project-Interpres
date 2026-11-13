@@ -15,6 +15,15 @@ jobs:
       - name: Install xcodegen
         run: brew install xcodegen
 
+      - name: Fetch StikJIT dependency
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p deps
+          gh release download 2.0.1 -R StikDebug/StikJIT -p "StikJIT.xcframework.zip" -D deps
+          unzip -q deps/StikJIT.xcframework.zip -d deps
+          rm -f deps/StikJIT.xcframework.zip
+
       - name: Generate project
         run: xcodegen generate
 
