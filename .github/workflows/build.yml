@@ -15,7 +15,7 @@ jobs:
       - name: Install xcodegen
         run: brew install xcodegen
 
-      - name: Build StikJIT dependency
+      - name: Fetch StikJIT dependency
         run: bash ios/scripts/fetch_deps.sh
 
       - name: Generate project

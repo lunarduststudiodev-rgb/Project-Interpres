@@ -17,7 +17,6 @@ targets:
         CFBundleShortVersionString: "0.0.1"
         CFBundleVersion: "1"
         UILaunchScreen: {}
-        # Expose the app's Documents folder in Files, for importing Mac apps and pairing files.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         LSApplicationQueriesSchemes:
@@ -43,34 +42,8 @@ targets:
           - "@executable_path/Frameworks"
     dependencies:
       - target: InterpresJITHelper
-    postBuildScripts:
-      - name: Embed StikJIT
-        script: |
-          set -e
-          SRC="$SRCROOT/deps/StikJIT.xcframework/ios-arm64/StikJIT.framework"
-          DST="$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/StikJIT.framework"
-          rm -rf "$DST"
-          mkdir -p "$(dirname "$DST")"
-          ditto "$SRC" "$DST"
-          rm -rf "$DST/Headers" "$DST/Modules"
-          PLIST="$DST/Info.plist"
-          if [ ! -f "$PLIST" ]; then
-            plutil -create xml1 "$PLIST"
-            plutil -insert CFBundleIdentifier -string "$PRODUCT_BUNDLE_IDENTIFIER.StikJIT" "$PLIST"
-            plutil -insert CFBundleExecutable -string StikJIT "$PLIST"
-            plutil -insert CFBundleName -string StikJIT "$PLIST"
-            plutil -insert CFBundlePackageType -string FMWK "$PLIST"
-            plutil -insert CFBundleInfoDictionaryVersion -string 6.0 "$PLIST"
-            plutil -insert CFBundleShortVersionString -string 2.0.1 "$PLIST"
-            plutil -insert CFBundleVersion -string 2.0.1 "$PLIST"
-            plutil -insert MinimumOSVersion -string 17.0 "$PLIST"
-            plutil -insert CFBundleSupportedPlatforms -array "$PLIST"
-            plutil -insert CFBundleSupportedPlatforms.0 -string iPhoneOS "$PLIST"
-          fi
-          if [ -n "$EXPANDED_CODE_SIGN_IDENTITY" ] && [ "$CODE_SIGNING_ALLOWED" != "NO" ]; then
-            codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" --timestamp=none "$DST"
-          fi
-        basedOnDependencyAnalysis: false
+      - target: StikJIT
+        embed: true
 
   InterpresJITHelper:
     type: app-extension
@@ -92,8 +65,35 @@ targets:
           - "$(inherited)"
           - "@executable_path/../../Frameworks"
     dependencies:
-      - framework: deps/StikJIT.xcframework
+      - target: StikJIT
         embed: false
+
+  StikJIT:
+    type: framework
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: deps/StikJIT/Sources
+      - path: deps/StikJIT/Scripts
+        buildPhase: resources
+    dependencies:
+      - sdk: JavaScriptCore.framework
+      - sdk: Network.framework
+      - sdk: Security.framework
+      - sdk: CFNetwork.framework
+      - sdk: SystemConfiguration.framework
+      - sdk: IOKit.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.interpres.app.StikJIT
+        PRODUCT_NAME: StikJIT
+        DEFINES_MODULE: YES
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/deps/StikJIT/idevice $(SRCROOT)/deps/StikJIT/iokit"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/deps/StikJIT/idevice $(SRCROOT)/deps/StikJIT/iokit"
+        LIBRARY_SEARCH_PATHS: "$(SRCROOT)/deps/StikJIT/idevice"
+        OTHER_LDFLAGS: "$(inherited) -Wl,-hidden-lidevice_ffi"
 
 schemes:
   Interpres:
@@ -101,3 +101,4 @@ schemes:
       targets:
         Interpres: all
         InterpresJITHelper: all
+        StikJIT: all
